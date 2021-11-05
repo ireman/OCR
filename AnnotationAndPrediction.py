@@ -6,7 +6,17 @@ import torchvision
 import torchvision.transforms as transforms
 
 
-def union(box1,box2):
+def bbox2(img):
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)[1]
+    rows = np.any(thresh, axis=1)
+    cols = np.any(thresh, axis=0)
+    ymin, ymax = np.where(rows)[0][[0, -1]]
+    xmin, xmax = np.where(cols)[0][[0, -1]]
+    return img[ymin:ymax + 1, xmin:xmax + 1]
+
+
+def union(box1, box2):
     x = min(box1[0], box2[0])
     y = min(box1[1], box2[1])
     w = max(box1[2], box2[2])
@@ -14,8 +24,8 @@ def union(box1,box2):
     return x, y, w, h
 
 
-def intersection(box1,box2):
-    if 2 < box1[2]-box2[0] < 50 and abs(box1[3]-box2[3]) < 20:
+def intersection(box1, box2):
+    if 2 < box1[2] - box2[0] < 50 and abs(box1[3] - box2[3]) < 20:
         return True
     return False
 
@@ -23,14 +33,14 @@ def intersection(box1,box2):
 def combine_boxes(boxes):
     new_array = []
     i = 0
-    while i < len(boxes)-1:
-        if intersection(boxes[i], boxes[i+1]):
-            new_array.append(union(boxes[i], boxes[i+1]))
-            i+=2
+    while i < len(boxes) - 1:
+        if intersection(boxes[i], boxes[i + 1]):
+            new_array.append(union(boxes[i], boxes[i + 1]))
+            i += 2
         else:
             new_array.append(boxes[i])
-            i+=1
-    if i <=len(boxes)-1:
+            i += 1
+    if i <= len(boxes) - 1:
         new_array.append(boxes[i])
     return np.array(new_array).astype('int')
 
@@ -131,10 +141,10 @@ class AnnotationAndPrediction:
         fixed_boxes = combine_boxes(array)
         fixed_boxes = combine_boxes(fixed_boxes)
         df1 = pd.DataFrame()
-        df1['X'] = fixed_boxes[:,0]
-        df1['Y'] = fixed_boxes[:,1]
-        df1['W'] = fixed_boxes[:,2] - fixed_boxes[:,0]
-        df1['H'] = fixed_boxes[:,3] - fixed_boxes[:,1]
+        df1['X'] = fixed_boxes[:, 0]
+        df1['Y'] = fixed_boxes[:, 1]
+        df1['W'] = fixed_boxes[:, 2] - fixed_boxes[:, 0]
+        df1['H'] = fixed_boxes[:, 3] - fixed_boxes[:, 1]
 
         bbox = df1.values[:, 0:4]
         y_val = bbox[0][1]
@@ -184,3 +194,26 @@ class AnnotationAndPrediction:
         df['predictions'] = predictions_list
 
         return df
+
+    def get_detexify_prediction(self, image: np.ndarray) -> list:
+        """
+        This function gets an image of one cuneiform hand-copy
+        and return list of tuples with 5 topk prediction and confidence.
+        """
+        crop_img = bbox2(image)
+        crop_img = cv2.resize(crop_img, dsize=(64, 64))
+        crop_img = (np.asarray(crop_img).reshape(64, 64, 3).astype(np.float64)) / 255
+
+        trans = transforms.ToTensor()
+        crop_img = trans(crop_img)
+        crop_img = crop_img.to(device=self.device)
+        self.model.eval()
+        with torch.no_grad():
+            scores = self.model(crop_img[None, ...])
+            probs = torch.nn.functional.softmax(scores, dim=1)
+            conf, predict = torch.topk(probs, 5)
+            pred_list = predict.flatten().tolist()
+            pred_label = [self.label_list[pred] for pred in pred_list]
+            conf_list = conf.flatten().tolist()
+            pred_with_conf_list = list(zip(pred_label, conf_list))
+        return pred_with_conf_list
