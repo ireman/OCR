@@ -1,0 +1,7 @@
+opencv-python~=4.5.1.48
+numpy~=1.19.4
+pandas~=1.1.4
+torch~=1.9.1
+torchvision~=0.10.1
+setuptools~=58.3.0
+detectron2~=0.6
